@@ -18,9 +18,8 @@ st.caption(
 WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co"
 
 
-@st.cache_data(ttl=15)  # 15秒缓存，保证组员修改后网页快速同步
+@st.cache_data(ttl=15)  # 15秒缓存，组员修改后自动更新
 def load_data():
-  # 拼接 WPS 导出 CSV 的直链（CSV 格式不会触发 WPS 的 Excel 防火墙拦截）
   clean_link = WPS_LINK.split("?")[0]
   export_url = f"{clean_link}/export?type=csv"
 
@@ -35,11 +34,22 @@ def load_data():
     response = requests.get(export_url, headers=headers, timeout=15)
     response.raise_for_status()
 
-    # 尝试自动识别编码读取 CSV 文本流
+    # 读取 CSV 并自动容错处理格式错乱的行
+    content = response.content
     try:
-      df = pd.read_csv(io.BytesIO(response.content), encoding="utf-8")
-    except UnicodeDecodeError:
-      df = pd.read_csv(io.BytesIO(response.content), encoding="gbk")
+      df = pd.read_csv(
+          io.BytesIO(content),
+          encoding="utf-8-sig",
+          on_bad_lines="skip",
+          engine="python",
+      )
+    except Exception:
+      df = pd.read_csv(
+          io.BytesIO(content),
+          encoding="gbk",
+          on_bad_lines="skip",
+          engine="python",
+      )
 
     return df, None
   except Exception as e:
