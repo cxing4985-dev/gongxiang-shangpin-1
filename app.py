@@ -15,7 +15,7 @@ st.title("📦 团队共享商品极速查询系统")
 st.caption("数据实时同步自 WPS 金山在线文档，支持按 SKU、货号、商品名或负责人快速检索")
 
 # WPS 金山文档共享链接
-WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co"
+WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co?output=xlsx"
 
 # 自动拼接 WPS 直连导出地址
 def get_download_url(url):
