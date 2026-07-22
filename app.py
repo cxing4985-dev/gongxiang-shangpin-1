@@ -11,7 +11,6 @@ st.title("📦 团队共享商品极速查询系统")
 st.caption("实时检索商品库，支持按 SKU、货号、商品名或负责人快速检索")
 
 
-@st.cache_data(ttl=5)
 def load_data():
   try:
     # 读取同级目录下的普通的 Excel 文件
