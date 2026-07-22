@@ -18,51 +18,38 @@ st.caption(
 WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co"
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=15)  # 15秒缓存，保证组员修改后网页快速同步
 def load_data():
-  # 拼接 WPS 导出 Excel 的标准参数
-  export_url = f"{WPS_LINK.split('?')[0]}?output=xlsx"
+  # 拼接 WPS 导出 CSV 的直链（CSV 格式不会触发 WPS 的 Excel 防火墙拦截）
+  clean_link = WPS_LINK.split("?")[0]
+  export_url = f"{clean_link}/export?type=csv"
 
-  session = requests.Session()
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      ),
-      "Accept": (
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-      ),
+      )
   }
 
   try:
-    # 请求文件
-    res = session.get(export_url, headers=headers, timeout=15, allow_redirects=True)
-    res.raise_for_status()
+    response = requests.get(export_url, headers=headers, timeout=15)
+    response.raise_for_status()
 
-    # 检查返回的是否为标准 Excel (ZIP 头部标识 PK)
-    if not res.content.startswith(b"PK"):
-      return (
-          None,
-          "WPS 拒绝了自动下载，请确认 WPS 文档权限已设置为【所有人可查看】。",
-      )
+    # 尝试自动识别编码读取 CSV 文本流
+    try:
+      df = pd.read_csv(io.BytesIO(response.content), encoding="utf-8")
+    except UnicodeDecodeError:
+      df = pd.read_csv(io.BytesIO(response.content), encoding="gbk")
 
-    # 读取 Excel 文件
-    excel_file = pd.ExcelFile(io.BytesIO(res.content), engine="openpyxl")
-
-    all_dfs = []
-    for sheet_name in excel_file.sheet_names:
-      df_sheet = pd.read_excel(excel_file, sheet_name=sheet_name)
-      if not df_sheet.empty:
-        df_sheet["来源工作表"] = sheet_name
-        all_dfs.append(df_sheet)
-
-    if all_dfs:
-      return pd.concat(all_dfs, ignore_index=True), None
-    else:
-      return None, "表格中没有找到数据。"
-
+    return df, None
   except Exception as e:
-    return None, f"加载失败: {str(e)}"
+    return (
+        None,
+        (
+            "数据加载失败，请检查网络或 WPS 链接权限。"
+            f" 错误信息: {str(e)}"
+        ),
+    )
 
 
 # 加载数据
@@ -77,6 +64,7 @@ else:
 
   if df is not None:
     if search_query:
+      # 全局模糊搜索
       mask = df.astype(str).apply(
           lambda row: row.str.contains(search_query, case=False).any(), axis=1
       )
