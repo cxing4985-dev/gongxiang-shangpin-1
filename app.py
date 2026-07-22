@@ -15,28 +15,40 @@ st.caption(
 )
 
 # WPS 金山文档共享链接
-WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co?output=xlsx"
+WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co"
 
 
-# 动态加载数据并做清理
-@st.cache_data(ttl=60)  # 60秒自动更新缓存
-def load_data(url):
+@st.cache_data(ttl=60)
+def load_data():
+  # 拼接 WPS 导出 Excel 的标准参数
+  export_url = f"{WPS_LINK.split('?')[0]}?output=xlsx"
+
+  session = requests.Session()
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      )
+      ),
+      "Accept": (
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      ),
   }
+
   try:
-    response = requests.get(url, headers=headers, timeout=15)
-    response.raise_for_status()
+    # 请求文件
+    res = session.get(export_url, headers=headers, timeout=15, allow_redirects=True)
+    res.raise_for_status()
 
-    # 读取 Excel 文件，明确使用 openpyxl 引擎
-    excel_file = pd.ExcelFile(
-        io.BytesIO(response.content), engine="openpyxl"
-    )
+    # 检查返回的是否为标准 Excel (ZIP 头部标识 PK)
+    if not res.content.startswith(b"PK"):
+      return (
+          None,
+          "WPS 拒绝了自动下载，请确认 WPS 文档权限已设置为【所有人可查看】。",
+      )
 
-    # 汇总所有 Sheet 表格数据
+    # 读取 Excel 文件
+    excel_file = pd.ExcelFile(io.BytesIO(res.content), engine="openpyxl")
+
     all_dfs = []
     for sheet_name in excel_file.sheet_names:
       df_sheet = pd.read_excel(excel_file, sheet_name=sheet_name)
@@ -45,32 +57,26 @@ def load_data(url):
         all_dfs.append(df_sheet)
 
     if all_dfs:
-      combined_df = pd.concat(all_dfs, ignore_index=True)
-      return combined_df, None
+      return pd.concat(all_dfs, ignore_index=True), None
     else:
-      return None, "WPS 表格中没有找到数据。"
+      return None, "表格中没有找到数据。"
 
   except Exception as e:
-    return (
-        None,
-        f"数据加载失败，请检查网络或WPS链接权限。错误信息: {str(e)}",
-    )
+    return None, f"加载失败: {str(e)}"
 
 
 # 加载数据
-df, error_msg = load_data(WPS_LINK)
+df, error_msg = load_data()
 
 if error_msg:
   st.error(error_msg)
 else:
-  # 搜索框
   search_query = st.text_input(
       "🔍 快速搜索（输入 SKU、货号、商品名称或负责人等）：", ""
   )
 
   if df is not None:
     if search_query:
-      # 全局模糊搜索
       mask = df.astype(str).apply(
           lambda row: row.str.contains(search_query, case=False).any(), axis=1
       )
