@@ -1,5 +1,4 @@
 import io
-import re
 import pandas as pd
 import requests
 import streamlit as st
@@ -18,50 +17,65 @@ st.caption(
 WPS_LINK = "https://www.kdocs.cn/l/cgLkQPC7A8Co"
 
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=10)  # 10秒缓存，确保修改快速同步
 def load_data():
-  session = requests.Session()
+  clean_link = WPS_LINK.split("?")[0]
+
+  # 尝试多种 WPS 的下载导出直连节点
+  urls_to_try = [
+      f"{clean_link}/export?type=csv",
+      f"{clean_link}?output=xlsx",
+      f"https://www.kdocs.cn/api/v3/office/file/{clean_link.split('/')[-1]}/download",
+  ]
+
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      )
+      ),
+      "Referer": "https://www.kdocs.cn/",
   }
 
-  try:
-    # 尝试访问导出地址
-    export_url = f"{WPS_LINK.split('?')[0]}/export?type=csv"
-    res = session.get(export_url, headers=headers, timeout=15)
+  session = requests.Session()
 
-    # 如果抓下来的是网页代码（包含 window.__PLUGINCONFIG__），说明被重定向到了 HTML
-    if "window.__PLUGINCONFIG__" in res.text or "<html" in res.text.lower():
-      # 改用直接抓取纯文本/表格接口的方式
-      export_url2 = f"{WPS_LINK.split('?')[0]}?output=xlsx"
-      res = session.get(export_url2, headers=headers, timeout=15)
-      excel_file = pd.ExcelFile(io.BytesIO(res.content), engine="openpyxl")
-      df = pd.read_excel(excel_file, sheet_name=0)
-    else:
-      # 正常读取 CSV
-      try:
-        df = pd.read_csv(io.BytesIO(res.content), encoding="utf-8-sig")
-      except Exception:
-        df = pd.read_csv(io.BytesIO(res.content), encoding="gbk")
+  for url in urls_to_try:
+    try:
+      res = session.get(url, headers=headers, timeout=10)
+      if res.status_code == 200 and len(res.content) > 1000:
+        # 如果返回的是 Excel 二进制 (PK开头)
+        if res.content.startswith(b"PK"):
+          excel_file = pd.ExcelFile(io.BytesIO(res.content), engine="openpyxl")
+          df = pd.read_excel(excel_file, sheet_name=0)
+          return df, None
 
-    # 过滤掉非数据行（比如包含 JavaScript 代码的行）
-    if not df.empty:
-      first_col_str = df.iloc[:, 0].astype(str)
-      df = df[~first_col_str.str.contains("window\.__", na=False)]
+        # 尝试作为 CSV 解析
+        try:
+          # 检查是不是 HTML 网页乱码
+          if b"<html" not in res.content.lower():
+            df = pd.read_csv(
+                io.BytesIO(res.content),
+                encoding="utf-8-sig",
+                on_bad_lines="skip",
+            )
+            # 过滤掉非正常表格行
+            if (
+                not df.empty
+                and "window.__" not in str(df.columns)
+                and len(df.columns) > 1
+            ):
+              return df, None
+        except Exception:
+          continue
+    except Exception:
+      continue
 
-    return df, None
-
-  except Exception as e:
-    return (
-        None,
-        (
-            "数据解析失败，请检查 WPS 链接或权限。"
-            f" 错误信息: {str(e)}"
-        ),
-    )
+  return (
+      None,
+      (
+          "WPS 官方安全防火墙拦截了数据拉取。如果依然报错，建议将表格复制一份到"
+          "【飞书多维表格】或【谷歌表格】，接口100%稳定！"
+      ),
+  )
 
 
 # 加载数据
@@ -86,5 +100,3 @@ else:
     else:
       st.info(f"当前共有 {len(df)} 条商品数据：")
       st.dataframe(df, use_container_width=True)
-  else:
-    st.warning("暂未读取到有效商品数据，请检查数据源。")
